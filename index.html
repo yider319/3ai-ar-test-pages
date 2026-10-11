@@ -27,16 +27,9 @@ function readings(){
 const done=s.floor&&s.desk, h=done?(s.desk.y-s.floor.y)*100:0;
 get("instruction").textContent=!s.floor?"第一步：對準地板並點畫面":!s.desk?"第二步：尋找高於地板約 73 cm 的桌面":"已標記兩點；請檢查數字";
 const diff=s.floor&&s.point?(s.point.y-s.floor.y)*100:null;
-get("live").textContent=done?"已標記兩點，綠色是仍在移動的候選點":!s.floor?(s.point?"找到候選地板點，可點畫面":"請移動相機尋找地板"):diff===null?"沒有候選表面；請緩慢掃視桌面":"綠色候選點相對地板： "+diff.toFixed(1)+" cm
-候選命中數： "+s.hitCount+"
-"+(Math.abs(diff-HEIGHT)<12?"高度接近桌面，可以放置":diff<25?"仍接近地板，先不要放置":"請確認綠色標記是否真的在桌面；偏差點也值得記錄");
+get("live").textContent=done?"已標記兩點，綠色是仍在移動的候選點":!s.floor?(s.point?"找到候選地板點，可點畫面":"請移動相機尋找地板"):diff===null?"沒有候選表面；請緩慢掃視桌面":"綠色候選點相對地板： "+diff.toFixed(1)+" cm\n候選命中數： "+s.hitCount+"\n"+(Math.abs(diff-HEIGHT)<12?"高度接近桌面，可以放置":diff<25?"仍接近地板，先不要放置":"請確認綠色標記是否真的在桌面；偏差點也值得記錄");
 if(s.warning&&!done)get("live").textContent+="\n"+s.warning;
-get("result").textContent=done?"AR 垂直差："+h.toFixed(1)+" cm
-人工參考：73.0 cm
-差距："+(h-HEIGHT).toFixed(1)+" cm
-地板點 local Y = "+s.floor.y.toFixed(3)+" m
-桌面點 local Y = "+s.desk.y.toFixed(3)+" m
-"+(Math.abs(h-HEIGHT)<=10?"合理候選；仍要多次量測":"異常值：請截圖保存，切勿當成桌面定位通過"):s.floor?"已放地板點：local Y = "+s.floor.y.toFixed(3)+" m；等待桌面點":"尚未放置地板點。";
+get("result").textContent=done?"AR 垂直差："+h.toFixed(1)+" cm\n人工參考：73.0 cm\n差距："+(h-HEIGHT).toFixed(1)+" cm\n地板點 local Y = "+s.floor.y.toFixed(3)+" m\n桌面點 local Y = "+s.desk.y.toFixed(3)+" m\n"+(Math.abs(h-HEIGHT)<=10?"合理候選；仍要多次量測":"異常值：請截圖保存，切勿當成桌面定位通過"):s.floor?"已放地板點：local Y = "+s.floor.y.toFixed(3)+" m；等待桌面點":"尚未放置地板點。";
 }
 function shader(gl,type,code){
 const sh=gl.createShader(type);gl.shaderSource(sh,code);gl.compileShader(sh);
