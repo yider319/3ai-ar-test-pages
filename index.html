@@ -1,22 +1,25 @@
 <!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>V1.2A.2 | AR 定位高度除錯</title>
+<title>V1.2A.3 | AR 高度數值即時顯示</title>
 <style>
 body{margin:0;background:#14202b;color:#eff6ff;font-family:system-ui,sans-serif} main{max-width:680px;margin:auto;padding:16px;line-height:1.65}
 button{padding:13px 16px;background:#b8e0ff;color:#14202b;border:0;border-radius:8px;font:600 16px system-ui;margin:5px}button:disabled{opacity:.5}
 #result,#status{white-space:pre-line;padding:12px;border:1px solid #6b8394;border-radius:8px}
 #canvas{position:fixed;width:100vw;height:100vh;inset:0;pointer-events:none}
 #overlay{display:none;position:fixed;inset:0;pointer-events:none;z-index:10}
-#panel{pointer-events:auto;max-width:500px;margin:env(safe-area-inset-top,10px) auto 0;background:#0c1928dc;border-radius:10px;padding:12px;line-height:1.6}
+#panel{pointer-events:auto;max-width:500px;margin:env(safe-area-inset-top,10px) auto 0;background:#0c1928e8;border-radius:10px;padding:10px;font-size:14px;line-height:1.4;max-height:62vh;overflow:auto}
+#panel button{font-size:14px;padding:8px 10px}
+#details{white-space:pre-line;font-variant-numeric:tabular-nums;border:1px solid #7897ac;border-radius:6px;padding:8px;margin:8px 0;background:#0b263d}
+#details strong{font-size:20px}
 </style></head><body><canvas id="canvas"></canvas><main>
-<h1>V1.2A.2 — 高度重複性診斷</h1>
+<h1>V1.2A.3 — 高度與定位座標診斷</h1>
 <p>在 Pixel Chrome 上，使用 WebXR 分別量出地板與桌面的位置。人工實測桌面離地約 <strong>73 公分</strong>，桌板厚約 1.6 公分。</p>
-<ol><li>按「開始 AR」，用綠色方塊選取地板，點畫面標記藍色地板點。</li><li>再從略高於桌面的角度，緩慢掃視桌面 10–20 秒。</li><li>看上方「綠色候選點相對地板高度」；接近 73 cm 時，再點畫面標記橘色桌面點。</li><li>若始終顯示接近 0 cm，先截圖回報，不要硬將地板點當桌面。</li></ol>
+<ol><li>按「開始 AR」，用綠色方塊選取地板，點畫面標記藍色地板點。</li><li>再從略高於桌面的角度，緩慢掃視桌面 10–20 秒。</li><li>看上方「綠色候選點相對地板高度」；接近 73 cm 時，再點畫面標記橘色桌面點。</li><li>選完兩點後，請直接查看 AR 畫面上方新增的<strong>「測得高度」「誤差」「local Y」</strong>，截圖記錄。即使異常也保留數值。</li></ol>
 <button id="start" disabled>開始 AR</button><div id="status">檢查 AR 支援中…</div>
 <h2>高度差</h2><div id="result">尚未測量</div>
 <p>本頁沒有使用第三方函式庫，也不傳送相機資料。這項測試只評估同一次 AR 工作階段內的高度測量，不包含 3D 模型自動對齊或跨次重新定位。</p>
 </main><div id="overlay"><div id="panel"><strong id="instruction">對準地板</strong>
-<div id="live">搜尋平面中…</div><button id="again">兩點重選</button><button id="retryTable">只重選桌面</button><button id="finish">結束 AR</button></div></div>
+<div id="live">搜尋平面中…</div><div id="details">等待地板標記…</div><button id="again">兩點重選</button><button id="retryTable">只重選桌面</button><button id="finish">結束 AR</button></div></div>
 <script>
 "use strict";
 (()=>{
@@ -25,10 +28,20 @@ const s={session:null,reference:null,source:null,gl:null,program:null,attributes
 const HEIGHT=73;
 function readings(){
 const done=s.floor&&s.desk, h=done?(s.desk.y-s.floor.y)*100:0;
-get("instruction").textContent=!s.floor?"第一步：對準地板並點畫面":!s.desk?"第二步：尋找高於地板約 73 cm 的桌面":"已標記兩點；請檢查數字";
+get("instruction").textContent=!s.floor?"第一步：標記地板":!s.desk?"第二步：標記桌面":"量測完成：請檢查下面的高度數字";
 const diff=s.floor&&s.point?(s.point.y-s.floor.y)*100:null;
 get("live").textContent=done?"已標記兩點，綠色是仍在移動的候選點":!s.floor?(s.point?"找到候選地板點，可點畫面":"請移動相機尋找地板"):diff===null?"沒有候選表面；請緩慢掃視桌面":"綠色候選點相對地板： "+diff.toFixed(1)+" cm\n候選命中數： "+s.hitCount+"\n"+(Math.abs(diff-HEIGHT)<12?"高度接近桌面，可以放置":diff<25?"仍接近地板，先不要放置":"請確認綠色標記是否真的在桌面；偏差點也值得記錄");
 if(s.warning&&!done)get("live").textContent+="\n"+s.warning;
+const floorY=s.floor?s.floor.y.toFixed(3):"—";
+const deskY=s.desk?s.desk.y.toFixed(3):"—";
+const horizontal=done?Math.hypot(s.desk.x-s.floor.x,s.desk.z-s.floor.z)*100:null;
+get("details").textContent=done
+  ?"測得高度："+h.toFixed(1)+" cm （人工參考 73.0 cm）\n"
+   +"誤差："+(h-HEIGHT>=0?"+":"")+(h-HEIGHT).toFixed(1)+" cm "+(Math.abs(h-HEIGHT)<=10?"〔合理候選，尚待重複〕":"〔異常，請保存截圖〕")+"\n"
+   +"地板 local Y："+floorY+" m | 桌面 local Y："+deskY+" m\n"
+   +"兩點水平距離："+horizontal.toFixed(1)+" cm"
+  :s.floor?"地板 local Y："+floorY+" m | 桌面 local Y：尚未選取\n綠色候選點高度："+(diff===null?"無命中":diff.toFixed(1)+" cm")
+  :"地板與桌面高度：等待標記";
 get("result").textContent=done?"AR 垂直差："+h.toFixed(1)+" cm\n人工參考：73.0 cm\n差距："+(h-HEIGHT).toFixed(1)+" cm\n地板點 local Y = "+s.floor.y.toFixed(3)+" m\n桌面點 local Y = "+s.desk.y.toFixed(3)+" m\n"+(Math.abs(h-HEIGHT)<=10?"合理候選；仍要多次量測":"異常值：請截圖保存，切勿當成桌面定位通過"):s.floor?"已放地板點：local Y = "+s.floor.y.toFixed(3)+" m；等待桌面點":"尚未放置地板點。";
 }
 function shader(gl,type,code){
