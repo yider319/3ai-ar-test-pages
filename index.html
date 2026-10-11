@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>V1.2A AR Height Check</title>
+<style>
+body{margin:0;background:#14202b;color:#eff6ff;font-family:system-ui,sans-serif} main{max-width:680px;margin:auto;padding:16px;line-height:1.65}
+button{padding:13px 16px;background:#b8e0ff;color:#14202b;border:0;border-radius:8px;font:600 16px system-ui;margin:5px}button:disabled{opacity:.5}
+#result,#status{white-space:pre-line;padding:12px;border:1px solid #6b8394;border-radius:8px}
+#canvas{position:fixed;width:100vw;height:100vh;inset:0;pointer-events:none}
+#overlay{display:none;position:fixed;inset:0;pointer-events:none;z-index:10}
+#panel{pointer-events:auto;max-width:500px;margin:env(safe-area-inset-top,10px) auto 0;background:#0c1928dc;border-radius:10px;padding:12px;line-height:1.6}
+</style></head><body><canvas id="canvas"></canvas><main>
+<h1>V1.2A — AR 高度校正</h1>
+<p>在 Pixel Chrome 上，使用 WebXR 分別量出地板與桌面的位置。人工實測桌面離地約 <strong>73 公分</strong>，桌板厚約 1.6 公分。</p>
+<ol><li>按「開始 AR」並允許使用相機。</li><li>對準地板，看到綠色方塊後點畫面，標記地板（藍色）。</li><li>對準桌面，看到綠色方塊後點畫面，標記桌面（橘色）。</li><li>讀取高度差，再重新量測兩次。</li></ol>
+<button id="start" disabled>開始 AR</button><div id="status">檢查 AR 支援中…</div>
+<h2>高度差</h2><div id="result">尚未測量</div>
+<p>本頁沒有使用第三方函式庫，也不傳送相機資料。這項測試只評估同一次 AR 工作階段內的高度測量，不包含 3D 模型自動對齊或跨次重新定位。</p>
+</main><div id="overlay"><div id="panel"><strong id="instruction">對準地板</strong>
+<div id="live">搜尋平面中…</div><button id="again">重新量測</button><button id="finish">結束 AR</button></div></div>
+<script>
+"use strict";
+(()=>{
+const get=id=>document.getElementById(id);
+const s={session:null,reference:null,source:null,gl:null,program:null,attributes:null,buffer:null,point:null,floor:null,desk:null};
+const HEIGHT=73;
+function readings(){
+const done=s.floor&&s.desk, h=done?(s.desk.y-s.floor.y)*100:0;
+get("instruction").textContent=!s.floor?"第一步：對準地板並點畫面":!s.desk?"第二步：對準桌面並點畫面":"量測完成";
+get("live").textContent=done?"AR 垂直差："+h.toFixed(1)+" cm":s.point?"綠色標記已出現，請點畫面":"尋找表面中…";
+get("result").textContent=done?"AR 高度："+h.toFixed(1)+" cm\n實測高度：73.0 cm\n誤差（AR − 實測）："+(h-HEIGHT).toFixed(1)+" cm":"尚未完整放置兩個標記。";
+}
+function shader(gl,type,code){
+const sh=gl.createShader(type);gl.shaderSource(sh,code);gl.compileShader(sh);
+if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(sh));
+return sh;
+}
+function graphics(){
+const gl=get("canvas").getContext("webgl",{xrCompatible:true,alpha:true,depth:true});
+if(!gl)throw Error("無法啟動 WebGL");
+const vs=shader(gl,gl.VERTEX_SHADER,"attribute vec3 position;uniform mat4 projection,view,model;void main(){gl_Position=projection*view*model*vec4(position,1.0);}");
+const fs=shader(gl,gl.FRAGMENT_SHADER,"precision mediump float;uniform vec4 color;void main(){gl_FragColor=color;}");
+const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,fs);gl.linkProgram(p);
+if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));
+const faces=[[-1,-1,1,1,-1,1,1,1,1,-1,1,1],[1,-1,-1,-1,-1,-1,-1,1,-1,1,1,-1],[-1,-1,-1,-1,-1,1,-1,1,1,-1,-1,1,-1],[1,-1,1,1,-1,-1,1,1,-1,1,1,1],[-1,1,1,1,1,1,1,1,-1,-1,1,-1],[-1,-1,-1,1,-1,-1,1,-1,1,-1,1]];
+const verts=[];for(const f of faces)for(const i of [0,1,2,0,2,3])verts.push(f[i*3],f[i*3+1],f[i*3+2]);
+const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(verts),gl.STATIC_DRAW);
+s.gl=gl;s.program=p;s.buffer=b;s.attributes={position:gl.getAttribLocation(p,"position"),projection:gl.getUniformLocation(p,"projection"),view:gl.getUniformLocation(p,"view"),model:gl.getUniformLocation(p,"model"),color:gl.getUniformLocation(p,"color")};
+return gl;
+}
+function box(P,V,pt,rgb){
+const gl=s.gl,a=s.attributes,k=.025;
+const model=new Float32Array([k,0,0,0,0,k,0,0,0,0,k,0,pt.x,pt.y+k,pt.z,1]);
+gl.uniformMatrix4fv(a.projection,false,P);gl.uniformMatrix4fv(a.view,false,V);gl.uniformMatrix4fv(a.model,false,model);
+gl.uniform4fv(a.color,rgb);gl.drawArrays(gl.TRIANGLES,0,36);
+}
+function render(t,frame){
+if(!s.session)return;
+frame.session.requestAnimationFrame(render);
+const pose=frame.getViewerPose(s.reference);if(!pose)return;
+const results=s.source?frame.getHitTestResults(s.source):[];
+const hit=results.length?results[0].getPose(s.reference):null;
+s.point=hit?{x:hit.transform.position.x,y:hit.transform.position.y,z:hit.transform.position.z}:null;
+const gl=s.gl,layer=s.session.renderState.baseLayer;
+gl.bindFramebuffer(gl.FRAMEBUFFER,layer.framebuffer);gl.enable(gl.DEPTH_TEST);
+gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+gl.useProgram(s.program);gl.bindBuffer(gl.ARRAY_BUFFER,s.buffer);gl.enableVertexAttribArray(s.attributes.position);
+gl.vertexAttribPointer(s.attributes.position,3,gl.FLOAT,false,0,0);
+for(const view of pose.views){
+const v=layer.getViewport(view);gl.viewport(v.x,v.y,v.width,v.height);
+if(s.point)box(view.projectionMatrix,view.transform.inverse.matrix,s.point,[0,1,.3,1]);
+if(s.floor)box(view.projectionMatrix,view.transform.inverse.matrix,s.floor,[.1,.4,1,1]);
+if(s.desk)box(view.projectionMatrix,view.transform.inverse.matrix,s.desk,[1,.5,.1,1]);
+}
+if(Math.floor(t/400)!==Math.floor((t-20)/400))readings();
+}
+function place(){
+if(!s.point)return;
+if(!s.floor)s.floor={...s.point};else if(!s.desk)s.desk={...s.point};
+readings();
+}
+get("again").onclick=()=>{s.floor=null;s.desk=null;readings();};
+get("finish").onclick=()=>{if(s.session)s.session.end();};
+get("overlay").addEventListener("beforexrselect",e=>{if(e.target.closest("button"))e.preventDefault();});
+get("start").onclick=async()=>{
+get("start").disabled=true;
+try{
+const gl=s.gl||graphics();
+await gl.makeXRCompatible();
+const session=await navigator.xr.requestSession("immersive-ar",{requiredFeatures:["hit-test"],optionalFeatures:["dom-overlay"],domOverlay:{root:get("overlay")}});
+s.session=session;session.addEventListener("select",place);
+session.addEventListener("end",()=>{
+if(s.source)s.source.cancel();s.source=null;s.session=null;s.point=null;get("overlay").style.display="none";get("start").disabled=false;readings();
+});
+session.updateRenderState({baseLayer:new XRWebGLLayer(session,gl)});
+s.reference=await session.requestReferenceSpace("local");
+const viewer=await session.requestReferenceSpace("viewer");
+s.source=await session.requestHitTestSource({space:viewer});
+get("overlay").style.display="block";
+session.requestAnimationFrame(render);
+}catch(e){get("status").textContent="啟動失敗："+(e.message||e);get("start").disabled=false;if(s.session)s.session.end();}
+};
+(async()=>{
+if(location.protocol!=="https:"&&location.hostname!=="localhost"){get("status").textContent="需使用 HTTPS 網址";return;}
+if(!navigator.xr){get("status").textContent="此瀏覽器沒有 WebXR";return;}
+try{
+const supported=await navigator.xr.isSessionSupported("immersive-ar");
+get("status").textContent=supported?"WebXR AR 可用":"這台裝置目前不支援 immersive-ar";
+get("start").disabled=!supported;
+}catch(e){get("status").textContent="檢查失敗："+e.message;}
+})();
+})();
+</script></body></html>
